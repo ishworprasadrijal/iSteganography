@@ -60,7 +60,6 @@ def replace_last_bit(image_byte, message_bit):
 	message_bit = str(message_bit)
 	s_byte = bytes(image_byte, 'ascii')
 	s_bits = '{:08b}'.format(int(s_byte, 16))
-	print(s_bits[:-1] + message_bit)
 	s_bits = s_bits[:-1] + message_bit
 	s_byte = '{:02x}'.format(int(s_bits, 2))
 	return s_byte
@@ -77,6 +76,11 @@ def get_last_bit(image_byte):
 def hide_message(dest_img, msg):
 	try:
 		image_original = Image.open(dest_img)
+		img = cv2.imread(dest_img,0)
+		edges = cv2.Canny(img,100,200)
+		cv2.imwrite('detected_edges.png',edges)
+		edges = Image.open('detected_edges.png')
+
 	except (FileNotFoundError):
 		print('Error: image not found')
 		return
@@ -91,6 +95,9 @@ def hide_message(dest_img, msg):
 	if image_original.mode in ('RGBA'):
 		image_new = image_original.convert('RGBA')
 		pixels_original = image_new.getdata()
+
+		image_edge_new = edges.convert('RGBA')
+		pixels_edges = image_edge_new.getdata()
 		print("CHARACTERS that can be encoded in this image : ")
 		print(len(pixels_original)/8 -3)
 		print("=======================================================================")
@@ -103,19 +110,21 @@ def hide_message(dest_img, msg):
 
 		for pixel in pixels_original:
 			if nbBitsProcessed < len(binary):
-				s_hex = rgb2hex(pixel[0], pixel[1], pixel[2])
-				s_pixel = replace_last_bit(s_hex, binary[nbBitsProcessed])
-				print(pixel)
-				# print("(message_bit, x, y) : ("+binary[nbBitsProcessed]+", "+s_hex+","+s_pixel+") : ")
-				r, g, b = hex2rgb(s_pixel)
-				pixels_new.append((r, g, b, pixel[3]))
-
+				for edge_pixel in pixels_edges:
+					if rgb2hex(edge_pixel[0], edge_pixel[1], edge_pixel[2]) == 'ffffff':
+						s_hex = rgb2hex(pixel[0], pixel[1], pixel[2])
+						s_pixel = replace_last_bit(s_hex, binary[nbBitsProcessed])
+						r, g, b = hex2rgb(s_pixel)
+						print('Original RGB value')
+						print(pixel[0], pixel[1], pixel[2])
+						print('New RGB value')
+						pixels_new.append((r, g, b, pixel[3]))
 			else:
 				pixels_new.append(pixel)
 
 			nbBitsProcessed += 1
 
-		image_new.putdata(pixels_new)
+		# image_new.putdata(pixels_new) #replace the edges with the pixels_new
 		s_new_image_path = dest_img.replace('.png', '') + '_s' + '.png'
 		image_new.save(s_new_image_path, 'PNG')
 
@@ -167,7 +176,7 @@ def find_edge(img):
 		img = cv2.imread(img,0)
 		# img = cv2.medianBlur(img, 1)
 		edges = cv2.Canny(img,100,200)
-
+		cv2.imwrite('detected_edges.png',edges)
 		indices = np.where(edges != [0])
 		print("The edge coordinates are :")
 		print("============================")
