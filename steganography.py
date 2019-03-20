@@ -1,354 +1,289 @@
-""" 
-	This program is based on DrapsTV's Steganography Tutorial (https://youtu.be/q3eOOMx5qoo)
-	
-	python steganography.py --encode --message "JPT message hiding ..." --image "edge.png"
-	python steganography.py --decode --image "edge_s.png"
-	python steganography.py --edge --image "edge.png"
-	python steganography.py --ends --image "triangle.png"
-
-"""
-
-""" IMPORT LIBRARIES """
-
 from PIL import Image
-import getopt, sys
-import cv2
 import numpy as np
-from matplotlib import pyplot as plt
-from pprint import pprint
+import sys
+import os.path
+import cv2
+
+import PIL.ImageDraw as draw
+import csv
+import math
 
 
-""" GLOBAL VARIABLES """
 
-s_terminate = 'END'
+MAX_ARGUMENTS_LIMIT = 4
+encode_arg = "-e"
+decode_arg = "-d"
+help_arg = "--help"
+help_txt = "SteganoPy is a python script that does Steganography"
+dataPixels = []
+slope = 1
 
+def valid_pixels(dim):
+    height, width = dim
+    for i in range(0,width):
+        append_pixel([[i,0]])
+        append_pixel([[i,-slope*(i)+height]])
+    for j in range(0,height):
+        append_pixel([[0,j]])
+    
+def append_pixel(np):
+    if not np in dataPixels:
+        dataPixels.extend(np)
 
-""" RGB TO HEX CONVERSION """
+def writeout(entries):
+    np.savetxt('original.csv', entries, delimiter=',')
 
-def rgb2hex(r, g, b):
-	return '{:02x}{:02x}{:02x}'.format(r, g, b)
+def get_image(image_path):
+    im = Image.open(image_path)
+    return im
 
-""" HEX TO RGB CONVERSION """
+def edges(img):
+    try:
+        image = Image.open(img, 'r')
+        img = cv2.imread(img,0)
+        edges = cv2.Canny(img,100,200)
+        cv2.imwrite('00_white_edge.png',edges)
+        
+    except (FileNotFoundError):
+        print('Error: image not found')
+        return
 
-def hex2rgb(hex):
-	hex = -len(hex) % 6 * '0' + hex
-	r = int(hex[-6:-4], 16)
-	g = int(hex[-4:-2], 16)
-	b = int(hex[-2:], 16)
-	return r, g, b
+def edge_coordinates():
+    im = cv2.imread('00_white_edge.png')
+    im[np.where((im == [255,255,255]).all(axis = 2))] = [255,0,0]
+    cv2.imwrite('01_blue_edge.png', im)
 
-""" STRING TO BINARY CONVERSION """
+    im = cv2.imread('00_white_edge.png')
+    im[np.where((im == [255,255,255]).all(axis = 2))] = [0,255,0]
+    cv2.imwrite('02_green_edge.png', im)
 
-def str2bin(message):
-	s_bytes = bytes(message, 'ascii')
-	s_bits = ['{:08b}'.format(byte) for byte in s_bytes]
-	s_binary = ''.join(s_bits)
-	return s_binary
+    im = cv2.imread('00_white_edge.png')
+    im[np.where((im == [255,255,255]).all(axis = 2))] = [0,0,255]
+    cv2.imwrite('03_red_edge.png', im)
 
-""" BINARY TO STRING CONVERSION """
+    im = cv2.imread('input.png')
+    im[np.where((im <= 10).all(axis = 2))] = [0,0,255]
+    cv2.imwrite('04_mixed_edge.png', im)
 
-def bin2str(binary):
-	binary = -len(binary) % 8 * '0' + binary
-	s_bits = [binary[byte : byte + 8] for byte in range(0, len(binary), 8)]
-	s_chars = [chr(int(byte, 2)) for byte in s_bits]
-	message = ''.join(s_chars)
-	return message
+    return 0
+    
+def get_slope(dim):
+    height,width = dim
+    slope= width/height
 
-""" REPLACE LAST BIT WITH MESSAGE BIT """
+def get_yc(x,m,c):
+    mx = m * x + c
+    return (int(mx))
 
-def replace_last_bit(image_byte, message_bit):
-	message_bit = str(message_bit)
-	s_byte = bytes(image_byte, 'ascii')
-	s_bits = '{:08b}'.format(int(s_byte, 16))
-	s_bits = s_bits[:-1] + message_bit
-	s_byte = '{:02x}'.format(int(s_bits, 2))
-	return s_byte
+# encode method takes image, width, rgb value and message
+def encode(im, wh_couple, pixels, text):
+    written = 0
+    char_index = 0
+    bit_index = 0
+    write_limit = len(text) * 7
+    print("Best Write Capacity: ",int(wh_couple[0]+wh_couple[1]+math.sqrt(wh_couple[0]*wh_couple[0]+wh_couple[1]*wh_couple[1]))*3,' Characters')
+    (width, height) = wh_couple
+    get_slope(wh_couple)
+    valid_pixels(wh_couple)
+    writeout(dataPixels)
+    for w in range(width):
+        if(w):
+            for h in range(height):
+                if [w,h] in dataPixels:
+                    r, g, b = 0, 0, 0
+                    for i in range(3):
+                        color = pixels[w, h][i]
+                        if written < write_limit:
+                            bit = '{0:07b}'.format(ord(text[char_index]))[bit_index]
+                            if color % 2 == 0 and bit == "1":
+                                color += 1
+                            elif color % 2 == 1 and bit == "0":
+                                color -= 1
+                            bit_index += 1
+                            written += 1
+                            if bit_index == 7:
+                                bit_index = 0
+                                char_index += 1
+                        else:
+                            if color % 2 == 1:
+                                color -= 1
+                        if i == 0:
+                            r = color
+                        elif i == 1:
+                            g = color
+                        elif i == 2:
+                            b = color
+                    pixels[w, h] = (r, g, b)
 
-""" FIND LAST BIT """
+    return np.asarray(im)
 
-def get_last_bit(image_byte):
-	s_byte = bytes(image_byte, 'ascii')
-	s_bits = '{:08b}'.format(int(s_byte, 16))
-	return s_bits[-1]
+def decode(wh_couple, pixels):
+    bin_buffer = ""
+    something_found = False
+    broken = False
+    bin_str = ""
+    (width, height) = wh_couple
+    calculate_psnr()
+    get_slope(wh_couple)
+    valid_pixels(wh_couple)
+    for w in range(width):
+        if(w):
+            for h in range(height):
+                if [w,h] in dataPixels:
+                    r, g, b = pixels[w, h]
 
-""" HIDE MESSAGE """
+                    bit = "1" if r % 2 == 1 else "0"
+                    bin_buffer += bit
+                    if len(bin_buffer) == 7:
+                        boolean, char = check_bin_buff(bin_buffer)
+                        if boolean:
+                            something_found = True
+                            bin_str += char
+                        else:
+                            broken = True
+                            break
+                        bin_buffer = ""
 
-def hide_message(dest_img, msg):
-	try:
-		image_original = Image.open(dest_img)
-		img = cv2.imread(dest_img,0)
-		edges = cv2.Canny(img,100,200)
-		cv2.imwrite('detected_edges.png',edges)
-		edges = Image.open('detected_edges.png')
+                    bit = "1" if g % 2 == 1 else "0"
+                    bin_buffer += bit
+                    if len(bin_buffer) == 7:
+                        boolean, char = check_bin_buff(bin_buffer)
+                        if boolean:
+                            something_found = True
+                            bin_str += char
+                        else:
+                            broken = True
+                            break
+                        bin_buffer = ""
+                    bit = "1" if b % 2 == 1 else "0"
+                    bin_buffer += bit
+                   
+                    if len(bin_buffer) == 7:
+                        boolean, char = check_bin_buff(bin_buffer)
+                        if boolean:
+                            something_found = True
+                            bin_str += char
+                        else:
+                            broken = True
+                            break
+                        bin_buffer = ""
 
-	except (FileNotFoundError):
-		print('Error: image not found')
-		return
+            if broken:
+                break
 
-	binary = str2bin(msg) + str2bin(s_terminate)
-	print("Message to Binary : ")
-	print(binary)
-	print("CHARACTERS to be encoded : ")
-	print(len(binary)/8 -3)
-	print("=======================================================================")
+    if something_found:
+        return bin_str
 
-	if image_original.mode in ('RGBA'):
-		image_new = image_original.convert('RGBA')
-		pixels_original = image_new.getdata()
+    else:
+        return None
 
-		image_edge_new = edges.convert('RGBA')
-		pixels_edges = image_edge_new.getdata()
-		print("CHARACTERS that can be encoded in this image : ")
-		print(len(pixels_original)/8 -3)
-		print("=======================================================================")
-		if len(binary) > len(pixels_original):
-			print('The message is too long for the selected picture')
-			return
+def check_bin_buff(text):
+    char_num = int(text, 2)
+    if char_num == 0:
+        return False, None
+    else:
+        return True, chr(char_num)
 
-		pixels_new = []
-		nbBitsProcessed = 0
+# encode function takes an arguement path, message and destination path
+def encode_operation(path, text, save_path=None):
+    original_image_path = path
+    new_image_path = "en_"+path
+    edges(original_image_path)
 
-		for pixel in pixels_original:
-			if nbBitsProcessed < len(binary):
-				for edge_pixel in pixels_edges:
-					if rgb2hex(edge_pixel[0], edge_pixel[1], edge_pixel[2]) == 'ffffff':
-						s_hex = rgb2hex(pixel[0], pixel[1], pixel[2])
-						s_pixel = replace_last_bit(s_hex, binary[nbBitsProcessed])
-						r, g, b = hex2rgb(s_pixel)
-						print('Original RGB value')
-						print(pixel[0], pixel[1], pixel[2])
-						print('New RGB value')
-						pixels_new.append((r, g, b, pixel[3]))
-			else:
-				pixels_new.append(pixel)
+    new_image = get_image(original_image_path)
+    pixels_rgb, wh = new_image.load(), new_image.size
 
-			nbBitsProcessed += 1
+    if wh[0] * wh[1] * 3 < len(text) * 7:
+        print("Warning: Text too long for that image!")
 
-		# image_new.putdata(pixels_new) #replace the edges with the pixels_new
-		s_new_image_path = dest_img.replace('.png', '') + '_s' + '.png'
-		image_new.save(s_new_image_path, 'PNG')
-
-		print('Success! ' + str(nbBitsProcessed // 8 -3) + ' bytes processed.')
-		print('New image saved as \"' + s_new_image_path + '\"')
-
-	else:
-		print('Source file incompatible.')
-
-
-def hide_file(dest_img, filepath):
-	try:
-		f = open(filepath, 'r')
-		hide_message(dest_img, f.read())
-	except (FileNotFoundError):
-		print('Error: file not found')
-
-
-def find_message(src_img):
-	try:
-		image = Image.open(src_img)
-	except (FileNotFoundError):
-		print('Error: image not found')
-		return
-
-	binary = ''
-	if image.mode in ('RGBA'):
-		image = image.convert('RGBA')
-		pixels = image.getdata()
-
-		for pixel in pixels:
-			s_hex = rgb2hex(pixel[0], pixel[1], pixel[2])
-			s_bit = get_last_bit(s_hex)
-			binary += s_bit
-			print(bin2str(binary[-len(str2bin(s_terminate)):]))
-			if binary[-len(str2bin(s_terminate)):] == str2bin(s_terminate):
-				print('Message recovered!')
-				return bin2str(binary[:-len(str2bin(s_terminate))])
-		print('Message or delimiter not found')
-		return ''
-	else:
-		print('Source file incompatible.')
-
-
-def find_edge(img):
-	try:
-		print("Finding edges in "+img+" :");
-		print("============================")
-		img = cv2.imread(img,0)
-		# img = cv2.medianBlur(img, 1)
-		edges = cv2.Canny(img,100,200)
-		cv2.imwrite('detected_edges.png',edges)
-		indices = np.where(edges != [0])
-		print("The edge coordinates are :")
-		print("============================")
-		pprint(indices)
-		print("============================")
-		coordinates = zip(indices[0], indices[1])
-		print(list(coordinates))
-		np.savetxt("coordinates.csv", indices, delimiter=",")
-		# print("Let an ant starts from P("+indices[0]+","+indices[1]+")")
-
-		plt.subplot(121),plt.imshow(img,cmap = 'gray')
-		plt.title('Original Image'), plt.xticks([]), plt.yticks([])
-		plt.subplot(122),plt.imshow(edges,cmap = 'gray')
-		plt.title('Edge Image'), plt.xticks([]), plt.yticks([])
-		plt.show()
-	except (FileNotFoundError):
-		print('Error: image not found')
-		return
-
-def resize_image(img):
-	try:
-		img = Image.open(img)
-		img = img.resize((20, 20), Image.ANTIALIAS)
-		img.save('resized.png')
-
-	except (FileNotFoundError):
-		print('Error: file not found')
-		sys.exit(1)
-
-def save_message(src_img, filepath):
-	try:
-		f = open(filepath, 'w')
-		f.write(find_message(src_img))
-	except (FileNotFoundError):
-		print('Error: file not found')
-
-
-def usage():
-	print('Usage: ' + __file__ + ' [mode] [image] [text]')
-	print()
-	print('Mode:\t\t\ttest')
-	print('-e, --encode\t\thide a message in an image')
-	print('-d, --decode\t\trecover a message in an image')
-	print()
-	print('Image:')
-	print('-i IMG, --image=IMG\tPNG image used as source and destination')
-	print()
-	print('Text:')
-	print('-m, MSG --message=MSG\tmessage to hide (use quotation marks "" if necessary)')
-	print('-f FILE, --file=FILE\tsource file for encoding or destination file for decoding')
+    array = encode(new_image, wh, pixels_rgb, text)
+    image = Image.fromarray(array)
+    if save_path is None:
+        image.save(new_image_path)
+    else:
+        image.save(save_path)
 
 
-def main(argv):
-	try:
-		opts, args = getopt.getopt(argv,'hedi:f:m:',['help', 'encode', 'decode', 'edge', 'ends', 'image=', 'file=', 'message='])
-	except getopt.GetoptError:
-		usage()
-		sys.exit(1)
-
-	mode = ''
-	image = ''
-	message = ''
-	filepath = ''
-	for opt, arg in opts:
-		# Help
-		if opt in ('-h', '--help'):
-			usage()
-			sys.exit(1)
-
-		# Mode (mutually exclusive)
-
-		# Encode
-		if opt in ('-e', '--encode'):
-			if mode:
-				print('--encode cannot be used with --decode')
-				sys.exit(1);
-			mode = 'encode'
-
-		# Decode
-		elif opt in ('-d', '--decode'):
-			if mode:
-				print('--encode cannot be used with --decode')
-				sys.exit(1);
-			mode = 'decode'
-
-		# Edge
-		elif opt in ('-ed', '--edge'):
-			if mode:
-				print('--edge cannot be used')
-				sys.exit(1);
-			mode = 'edge'
-
-		# End Points
-		elif opt in ('-ep', '--ends'):
-			if mode:
-				print('--ends cannot be used')
-				sys.exit(1);
-			mode = 'ends'
-
-		# Input (mutually exclusive)
-
-		# Message
-		if opt in ('-m', '--message'):
-			if message or filepath:
-				print('--message cannot be used with --file')
-				sys.exit(1);
-			message = arg
-
-		# File
-		if opt in ('-f', '--file'):
-			if filepath or message:
-				print('--message cannot be used with --file')
-				sys.exit(1);
-			filepath = arg
-
-		# Image
-		if opt in ('-i', '--image'):
-			if image:
-				print('You must provide only one image')
-				sys.exit(1);
-			image = arg
+def decode_operation(path):
+    edges(path)
+    image = get_image(path)
+    pixels_rgb, wh = image.load(), image.size
+    text_found = decode(wh, pixels_rgb)
+    print("Message: " + str(text_found))
 
 
-	
-	# Validation
-	if not mode:
-		print('You must select a mode: --encode (-e) or --decode (-d) or --edge (-ed)')
-		sys.exit(1)
-	if mode =='encode' and not message and not filepath:
-		print('You must provide a message or a file to encode with --message (-m) or --file (-f)')
-		sys.exit(1)
-	if mode == 'decode' and message:
-		print('--decode cannot be used with --message')
-		sys.exit(1)
-	if mode == 'edge' and message:
-		print('--edge cannot be used with --message')
-		sys.exit(1)
-	if mode == 'ends' and message:
-		print('--ends cannot be used with --message')
-		sys.exit(1)
-	if not image:
-		print('You must provide an image filepath with --image (-i)')
-		sys.exit(1)
+def calculate_psnr():
+    original = cv2.imread("input.png")
+    contrast = cv2.imread("en_input.png",1)
+    def psnr(img1, img2):
+        mse = np.mean( (img1 - img2) ** 2 )
+        if mse == 0:
+            return 100
+        PIXEL_MAX = 255.0
+        return 20 * math.log10(PIXEL_MAX / math.sqrt(mse))
 
-	# Execution
-	if mode == 'encode':
-		if message:
-			hide_message(image, message)
-		elif filepath:
-			hide_file(image, filepath)
-	elif mode == 'decode':
-		if not filepath:
-			print(find_message(image))
-		else:
-			save_message(image, filepath)
-	elif mode == 'edge':
-		if not message:
-			print(find_edge(image))
-		else:
-			print('Finding edges ...')
-			sys.exit(1)
-	elif mode == 'ends':
-		if not message:
-			print(image)
-			print(resize_image(image))
-		else:
-			print('Finding edges ...')
-			sys.exit(1)
+    d=psnr(original,contrast)
+    print("PSNR : ",d)    
 
-if __name__ == "__main__":
-	try:
-		main(sys.argv[1:])
-	except (KeyboardInterrupt):
-		print()
-		sys.exit(1)
+def main():
+    sys.stdout = sys.stderr
+    if len(sys.argv) > MAX_ARGUMENTS_LIMIT + 1:
+        print("ERROR: Max number of arguments exceeded!")
+    elif len(sys.argv) == 1:
+        print("ERROR: Too few arguments!")
+        print("_"*100)
+        print(help_txt)
+    else:
+        first_arg = sys.argv[1]
+        if first_arg == encode_arg:
+            second_arg = sys.argv[2]
+            if second_arg == "" or second_arg is None:
+                print("ERROR: Too few arguments!")
+                return
+            image_path = second_arg
+            if not (image_path[-3:] != "png" or image_path[-4:] != "jpeg" or image_path[-3:] != "jpg"):
+                print("ERROR: Only JPEG & PNG images allowed!")
+                return
+            elif not os.path.exists(image_path):
+                print("ERROR: File not found!")
+                return
+            else:
+                third_arg = sys.argv[3]
+                text = third_arg
+                if text == "" or text is None:
+                    print("ERROR: No text to hide found!")
+                    return
+                if len(sys.argv) == 4:
+                    encode_operation(image_path, str(text))
+                elif len(sys.argv) == 5:
+                    fourth_arg = sys.argv[4]
+                    new_path = fourth_arg
+                    if os.access(os.path.dirname(new_path), os.W_OK):
+                        encode_operation(image_path, str(text), new_path)
+                    else:
+                        print("ERROR: Write restricted at '" + new_path + "' or it's a directory!")
+                        return
+                else:
+                    print("ERROR: Too many arguments!")
+                    return
+        elif first_arg == decode_arg:
+            second_arg = sys.argv[2]
+            encoded_path = second_arg
+
+            if second_arg == "" or second_arg is None:
+                print("ERROR: Too few arguments!")
+                return
+            elif os.path.exists(encoded_path):
+                decode_operation(encoded_path)
+            else:
+                print("ERROR: File not found!")
+                return
+
+        elif first_arg == help_arg:
+            print(help_txt)
+        else:
+            print("ERROR: Unknown or no arguments! "+first_arg)
+            return
+
+
+main()
